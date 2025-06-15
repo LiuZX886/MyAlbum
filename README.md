@@ -1,2 +1,2 @@
 # MyAlbum
-AlbumofZXLiu
+This is the album of ZX Liu.
