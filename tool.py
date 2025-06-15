@@ -90,71 +90,62 @@ def compress_photo():
     compress('2', des_dir, src_dir, file_list_src)
 
 
+# tool.py
+
 def handle_photo():
     '''根据图片的文件名处理成需要的json格式的数据
-    
+
     -----------
     最后将data.json文件存到博客的source/photos文件夹下
     '''
-    src_dir, des_dir = "photos/", "min_photos/"
-    file_list = sorted(list_img_file(src_dir))
+    src_dir = "photos/"
+    file_list = sorted(list_img_file(src_dir), reverse=True) # 使用 reverse=True 直接在这里实现倒序
     list_info = []
     for i in range(len(file_list)):
         filename = file_list[i]
+        # 打开图片获取真实尺寸
+        try:
+            img_size = Image.open(src_dir + filename).size
+            size_str = f"{img_size[0]}x{img_size[1]}"
+        except Exception as e:
+            print(f"无法读取图片 {filename} 的尺寸: {e}")
+            size_str = "1080x1080" # 如果读取失败，使用一个默认值
+
         date_str, info = filename.split("_")
         info, _ = info.split(".")
         date = datetime.strptime(date_str, "%Y-%m-%d")
-        year_month = date_str[0:7]            
-        if i == 0:  # 处理第一个文件
-            new_dict = {"date": year_month, "arr":{'year': date.year,
-                                                                   'month': date.month,
-                                                                   'link': [filename],
-                                                                   'text': [info],
-                                                                   'type': ['image']
-                                                                   }
-                                        } 
+        year_month = date_str[0:7]
+
+        if not list_info or year_month != list_info[-1]['date']:
+            # 如果是列表空的，或者月份变了，就新建一个dict
+            new_dict = {
+                "date": year_month,
+                "arr": {
+                    'year': date.year,
+                    'month': date.month,
+                    'link': [filename],
+                    'text': [info],
+                    'type': ['image'],
+                    'size': [size_str]  # <-- 新增size字段
+                }
+            }
             list_info.append(new_dict)
-        elif year_month != list_info[-1]['date']:  # 不是最后的一个日期，就新建一个dict
-            new_dict = {"date": year_month, "arr":{'year': date.year,
-                                                   'month': date.month,
-                                                   'link': [filename],
-                                                   'text': [info],
-                                                   'type': ['image']
-                                                   }
-                        }
-            list_info.append(new_dict)
-        else:  # 同一个日期
+        else:
+            # 否则，在最后一个条目中追加信息
             list_info[-1]['arr']['link'].append(filename)
             list_info[-1]['arr']['text'].append(info)
             list_info[-1]['arr']['type'].append('image')
-    list_info.reverse()  # 翻转
+            list_info[-1]['arr']['size'].append(size_str) # <-- 新增size字段
+
+    # 注意：我将 list_info.reverse() 移除了，直接在 sorted() 中实现了倒序
     final_dict = {"list": list_info}
-    with open("../Blog/themes/next/source/lib/album/data.json","w") as fp:
+
+    # 请确认这里的路径是正确的
+    blog_data_path = "../Blog/themes/next/source/lib/album/data.json"
+    with open(blog_data_path, "w") as fp:
         json.dump(final_dict, fp, ensure_ascii=False)
-def cut_photo():
-    """裁剪算法
-    
-    ----------
-    调用Graphics类中的裁剪算法，将src_dir目录下的文件进行裁剪（裁剪成正方形）
-    """
-    src_dir = "photos/"
-    if directory_exists(src_dir):
-        if not directory_exists(src_dir):
-            make_directory(src_dir)
-        # business logic
-        file_list = list_img_file(src_dir)
-        # print file_list
-        if file_list:
-            print_help()
-            for infile in file_list:
-                img = Image.open(src_dir+infile)
-                Graphics(infile=src_dir+infile, outfile=src_dir + infile).cut_by_ratio()            
-        else:
-            pass
-    else:
-        print("source directory not exist!")     
 
-
+    print("data.json 文件已成功生成！")
 
 def git_operation():
     
