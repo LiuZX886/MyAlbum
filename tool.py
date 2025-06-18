@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# coding: utf-8
 from PIL import Image
 import os
 import sys
@@ -17,6 +17,7 @@ def make_directory(directory):
     """创建目录"""
     os.makedirs(directory)
 
+
 def directory_exists(directory):
     """判断目录是否存在"""
     if os.path.exists(directory):
@@ -24,16 +25,21 @@ def directory_exists(directory):
     else:
         return False
 
+
 def list_img_file(directory):
     """列出目录下所有文件，并筛选出图片文件列表返回"""
     old_list = os.listdir(directory)
-    #print old_list
+    # print old_list
     new_list = []
     for filename in old_list:
-        name, fileformat = filename.split(".")
-        if fileformat.lower() == "jpg" or fileformat.lower() == "png" or fileformat.lower() == "gif":
-            new_list.append(filename)
-    #print new_list
+        try:
+            name, fileformat = filename.split(".")
+            if fileformat.lower() in ["jpg", "png", "gif", "jpeg"]:
+                new_list.append(filename)
+        except ValueError:
+            # Handles files without extensions, like .DS_Store
+            continue
+    # print new_list
     return new_list
 
 
@@ -44,11 +50,15 @@ def print_help():
     1) normal compress(4M to 1M around)
     2) small compress(4M to 500K around)
     3) smaller compress(4M to 300K around)
+    4) smallest compress (4M to 150K around)
     """)
 
+
 def compress(choose, des_dir, src_dir, file_list):
-    """压缩算法，img.thumbnail对图片进行压缩，
-    
+    """
+    Crops the original image to a square from the center, then resizes it to create a thumbnail.
+    The original image in src_dir remains unmodified.
+
     参数
     -----------
     choose: str
@@ -56,41 +66,83 @@ def compress(choose, des_dir, src_dir, file_list):
     """
     if choose == '1':
         scale = SIZE_normal
-    if choose == '2':
+    elif choose == '2':
         scale = SIZE_small
-    if choose == '3':
+    elif choose == '3':
         scale = SIZE_more_small
-    if choose == '4':
+    elif choose == '4':
         scale = SIZE_more_small_small
+    else:
+        # Default to normal size if input is invalid
+        scale = SIZE_normal
+
     for infile in file_list:
-        img = Image.open(src_dir+infile)
-        # size_of_file = os.path.getsize(infile)
-        w, h = img.size
-        img.thumbnail((int(w/scale), int(h/scale)))
-        img.save(des_dir + infile)
+        try:
+            # Open the original image
+            img = Image.open(os.path.join(src_dir, infile))
+
+            # --- Cropping Logic ---
+            (x, y) = img.size
+            if x > y:
+                # Crop the center of the image (landscape)
+                left = (x - y) / 2
+                top = 0
+                right = left + y
+                bottom = y
+            elif y > x:
+                # Crop the center of the image (portrait)
+                left = 0
+                top = (y - x) / 2
+                right = x
+                bottom = top + x
+            else:
+                # Image is already square
+                left, top, right, bottom = 0, 0, x, y
+
+            # Crop the image in memory
+            crop_img = img.crop((left, top, right, bottom))
+
+            # --- Resizing Logic (Thumbnail) ---
+            # Calculate the target size for the thumbnail based on the scale
+            base_size = min(x, y)
+            thumb_size = (int(base_size / scale), int(base_size / scale))
+
+            # Resize the cropped image using LANCZOS for better quality (replaces ANTIALIAS)
+            crop_img = crop_img.resize(thumb_size, Image.Resampling.LANCZOS)
+
+            # Save the final cropped and resized thumbnail
+            crop_img.save(os.path.join(des_dir, infile))
+        except Exception as e:
+            print(f"Could not process {infile}. Error: {e}")
+
+
 def compress_photo():
     '''调用压缩图片的函数
     '''
     src_dir, des_dir = "photos/", "min_photos/"
-    
-    if directory_exists(src_dir):
-        if not directory_exists(src_dir):
-            make_directory(src_dir)
-        # business logic
-        file_list_src = list_img_file(src_dir)
-    if directory_exists(des_dir):
-        if not directory_exists(des_dir):
-            make_directory(des_dir)
-        file_list_des = list_img_file(des_dir)
-        # print file_list
+
+    if not directory_exists(src_dir):
+        print(f"Source directory '{src_dir}' not found.")
+        make_directory(src_dir)
+        print(f"Created directory '{src_dir}'. Please add photos and run again.")
+        return
+
+    if not directory_exists(des_dir):
+        make_directory(des_dir)
+
+    file_list_src = list_img_file(src_dir)
+    file_list_des = list_img_file(des_dir)
+
     '''如果已经压缩了，就不再压缩'''
-    for i in range(len(file_list_des)):
-        if file_list_des[i] in file_list_src:
-            file_list_src.remove(file_list_des[i])
-    compress('2', des_dir, src_dir, file_list_src)
+    files_to_compress = [f for f in file_list_src if f not in file_list_des]
 
+    if not files_to_compress:
+        print("No new photos to compress.")
+        return
 
-# tool.py
+    print(f"Found {len(files_to_compress)} new photos to compress.")
+    compress('4', des_dir, src_dir, files_to_compress)
+
 
 def handle_photo():
     '''根据图片的文件名处理成需要的json格式的数据
@@ -99,66 +151,91 @@ def handle_photo():
     最后将data.json文件存到博客的source/photos文件夹下
     '''
     src_dir = "photos/"
-    file_list = sorted(list_img_file(src_dir), reverse=True) # 使用 reverse=True 直接在这里实现倒序
+    if not directory_exists(src_dir):
+        print(f"Source directory '{src_dir}' not found for JSON handling.")
+        return
+
+    file_list = list_img_file(src_dir)
     list_info = []
-    for i in range(len(file_list)):
-        filename = file_list[i]
-        # 打开图片获取真实尺寸
+
+    # Group photos by month
+    photos_by_month = {}
+    for filename in file_list:
         try:
-            img_size = Image.open(src_dir + filename).size
-            size_str = f"{img_size[0]}x{img_size[1]}"
-        except Exception as e:
-            print(f"无法读取图片 {filename} 的尺寸: {e}")
-            size_str = "1080x1080" # 如果读取失败，使用一个默认值
+            date_str, info_part = filename.split("_", 1)
+            info, _ = os.path.splitext(info_part)
 
-        date_str, info = filename.split("_")
-        info, _ = info.split(".")
-        date = datetime.strptime(date_str, "%Y-%m-%d")
-        year_month = date_str[0:7]
+            # Create a datetime object to handle dates
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            year_month = date_obj.strftime("%Y-%m")
 
-        if not list_info or year_month != list_info[-1]['date']:
-            # 如果是列表空的，或者月份变了，就新建一个dict
-            new_dict = {
-                "date": year_month,
-                "arr": {
-                    'year': date.year,
-                    'month': date.month,
-                    'link': [filename],
-                    'text': [info],
-                    'type': ['image'],
-                    'size': [size_str]  # <-- 新增size字段
+            if year_month not in photos_by_month:
+                photos_by_month[year_month] = {
+                    'year': date_obj.year,
+                    'month': date_obj.month,
+                    'photos': []
                 }
-            }
-            list_info.append(new_dict)
-        else:
-            # 否则，在最后一个条目中追加信息
-            list_info[-1]['arr']['link'].append(filename)
-            list_info[-1]['arr']['text'].append(info)
-            list_info[-1]['arr']['type'].append('image')
-            list_info[-1]['arr']['size'].append(size_str) # <-- 新增size字段
 
-    # 注意：我将 list_info.reverse() 移除了，直接在 sorted() 中实现了倒序
+            photos_by_month[year_month]['photos'].append({
+                'link': filename,
+                'text': info,
+                'type': 'image'
+            })
+        except ValueError:
+            print(f"Skipping '{filename}'. Filename must be in 'YYYY-MM-DD_text.ext' format.")
+            continue
+
+    # Convert grouped photos to the final list format
+    for key, value in photos_by_month.items():
+        photo_arr = {
+            'year': value['year'],
+            'month': value['month'],
+            'link': [p['link'] for p in value['photos']],
+            'text': [p['text'] for p in value['photos']],
+            'type': [p['type'] for p in value['photos']],
+        }
+        list_info.append({"date": key, "arr": photo_arr})
+
+    # Sort the list by date in descending order
+    list_info = SortDict(list_info)
+
     final_dict = {"list": list_info}
+    json_path = os.path.join("../Blog/source/album/data.json")
 
-    # 请确认这里的路径是正确的
-    blog_data_path = "../Blog/themes/next/source/lib/album/data.json"
-    with open(blog_data_path, "w") as fp:
-        json.dump(final_dict, fp, ensure_ascii=False)
+    # Ensure the directory for the JSON file exists
+    os.makedirs(os.path.dirname(json_path), exist_ok=True)
 
-    print("data.json 文件已成功生成！")
+    with open(json_path, "w") as fp:
+        json.dump(final_dict, fp, indent=4)
+    print(f"JSON data successfully written to {json_path}")
+
+
+# 冒泡排序
+def SortDict(list_info):
+    n = len(list_info)
+    for i in range(n):
+        for j in range(0, n - i - 1):
+            date1 = datetime.strptime(list_info[j]['date'], "%Y-%m")
+            date2 = datetime.strptime(list_info[j + 1]['date'], "%Y-%m")
+            if date1 < date2:
+                list_info[j], list_info[j + 1] = list_info[j + 1], list_info[j]
+    return list_info
+
 
 def git_operation():
-    
+    '''
+    git 命令行函数，将仓库提交
+
+    ----------
+    需要安装git命令行工具，并且添加到环境变量中
+    '''
     os.system('git add --all')
     os.system('git commit -m "add photos"')
     os.system('git push origin master')
 
-# if __name__ == "__main__":
-#     cut_photo()        # 裁剪图片，裁剪成正方形，去中间部分
-#     compress_photo()   # 压缩图片，并保存到mini_photos文件夹下
-#     git_operation()    # 提交到github仓库
-#     handle_photo()     # 将文件处理成json格式，存到博客仓库中
-#cut_photo()        # 裁剪图片，裁剪成正方形，去中间部分
-compress_photo()   # 压缩图片，并保存到mini_photos文件夹下
-#git_operation()    # 提交到github仓库
-handle_photo()     # 将文件处理成json格式，存到博客仓库中
+
+if __name__ == "__main__":
+    compress_photo()  # Compresses new photos into thumbnails (cropped to square)
+    handle_photo()  # Processes photo metadata into JSON for the blog
+    # To enable git operations, uncomment the line below
+    # git_operation()    # Commits changes to the git repository

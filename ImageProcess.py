@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-  
+# coding=utf-8  
 from PIL import Image  
 import shutil  
 import os  
@@ -77,4 +77,5 @@ class Graphics:
             #裁切图片  
             crop_img = im.crop(region)  
             #保存裁切后的图片  
-            crop_img.save(self.outfile)
+            crop_img.save(self.outfile)             
+
